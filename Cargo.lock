@@ -2006,17 +2006,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "tower-cell"
-version = "0.1.0"
-dependencies = [
- "redis-cell-client",
-]
-
-[[package]]
 name = "tower-layer"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "121c2a6cda46980bb0fcd1647ffaf6cd3fc79a013de288782836f6df9c48780e"
+
+[[package]]
+name = "tower-rate-limit"
+version = "0.1.0"
+dependencies = [
+ "http",
+ "redis",
+ "redis-cell-client",
+ "tower",
+]
 
 [[package]]
 name = "tower-service"

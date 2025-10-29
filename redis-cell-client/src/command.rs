@@ -1,19 +1,15 @@
 use derive_builder::Builder;
-use redis::Cmd;
+use redis::Cmd as RedisCmd;
 use std::time::Duration;
 
 #[derive(Clone, Debug, Builder)]
 #[builder(
     pattern = "mutable",
     derive(Debug),
-    custom_constructor,
     setter(into),
     build_fn(name = "try_build", private)
 )]
-pub struct RedisCellCommand<'a> {
-    #[builder(setter(custom))]
-    pub key: &'a str,
-
+pub struct Policy {
     #[builder(default = "15")]
     pub burst: usize,
 
@@ -27,34 +23,38 @@ pub struct RedisCellCommand<'a> {
     pub apply: usize,
 }
 
-impl<'a> RedisCellCommand<'a> {
-    pub fn builder(key: &'a str) -> RedisCellCommandBuilder<'a> {
-        RedisCellCommandBuilder::new(key)
+impl Policy {
+    pub fn builder() -> PolicyBuilder {
+        PolicyBuilder::create_empty()
     }
 }
 
-impl<'a> RedisCellCommandBuilder<'a> {
-    pub fn new(key: &'a str) -> RedisCellCommandBuilder<'a> {
-        RedisCellCommandBuilder {
-            key: Some(key),
-            ..RedisCellCommandBuilder::create_empty()
-        }
-    }
-
-    pub fn build(&mut self) -> RedisCellCommand<'_> {
+impl PolicyBuilder {
+    pub fn build(&mut self) -> Policy {
         self.try_build().expect("all set")
     }
 }
 
-impl From<RedisCellCommand<'_>> for Cmd {
-    fn from(val: RedisCellCommand<'_>) -> Self {
-        let mut cmd = Cmd::new();
+pub struct Cmd<'a> {
+    key: &'a str,
+    policy: &'a Policy,
+}
+
+impl<'a> Cmd<'a> {
+    pub fn new(key: &'a str, policy: &'a Policy) -> Self {
+        Cmd { key, policy }
+    }
+}
+
+impl<'a> From<Cmd<'a>> for RedisCmd {
+    fn from(Cmd { key, policy }: Cmd<'a>) -> Self {
+        let mut cmd = RedisCmd::new();
         cmd.arg("CL.THROTTLE")
-            .arg(val.key)
-            .arg(val.burst)
-            .arg(val.tokens)
-            .arg(val.period.as_secs())
-            .arg(val.apply);
+            .arg(key)
+            .arg(policy.burst)
+            .arg(policy.tokens)
+            .arg(policy.period.as_secs())
+            .arg(policy.apply);
         cmd
     }
 }
