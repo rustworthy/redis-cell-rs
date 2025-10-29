@@ -1,6 +1,6 @@
+use redis::Cmd as RedisCmd;
 use redis::aio::ConnectionManager;
-use redis_cell_client::{Cmd, Policy};
-use std::borrow::Cow;
+use std::{borrow::Cow, pin::Pin};
 
 pub trait ExtractKey {
     type Error;
@@ -9,10 +9,18 @@ pub trait ExtractKey {
     fn extract<'a>(&self, req: &'a Self::Request) -> Result<Cow<'a, str>, Self::Error>;
 }
 
+pub use redis_cell_client::{Cmd, Policy, PolicyBuilder};
+
 #[derive(Clone)]
 pub struct RateLimitConfig<Ex> {
     extractor: Ex,
     policy: Policy,
+}
+
+impl<Ex> RateLimitConfig<Ex> {
+    pub fn new(extractor: Ex, policy: Policy) -> Self {
+        RateLimitConfig { extractor, policy }
+    }
 }
 
 #[derive(Clone)]
@@ -34,12 +42,14 @@ impl<S, Ex> RateLimit<S, Ex> {
 
 impl<S, Ex, ReqTy> tower::Service<ReqTy> for RateLimit<S, Ex>
 where
-    S: tower::Service<ReqTy>,
+    S: tower::Service<ReqTy> + Clone + Send + 'static,
     Ex: ExtractKey<Request = ReqTy>,
+    ReqTy: Send + 'static,
+    S::Future: Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = S::Future;
+    type Future = Pin<Box<dyn Future<Output = Result<S::Response, S::Error>> + Send>>;
 
     fn poll_ready(
         &mut self,
@@ -55,7 +65,14 @@ where
             todo!();
         };
         let cmd = Cmd::new(&key, &self.config.policy);
-        self.connection.send_packed_command(&cmd.into());
-        self.inner.call(req)
+        let cmd: RedisCmd = cmd.into();
+
+        let mut connection = self.connection.clone();
+        let mut inner = self.inner.clone();
+        Box::pin(async move {
+            let res = connection.send_packed_command(&cmd).await;
+            dbg!(&res);
+            inner.call(req).await
+        })
     }
 }

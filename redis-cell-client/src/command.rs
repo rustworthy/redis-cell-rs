@@ -4,7 +4,7 @@ use std::time::Duration;
 
 #[derive(Clone, Debug, Builder)]
 #[builder(
-    pattern = "mutable",
+    pattern = "owned",
     derive(Debug),
     setter(into),
     build_fn(name = "try_build", private)
@@ -30,7 +30,7 @@ impl Policy {
 }
 
 impl PolicyBuilder {
-    pub fn build(&mut self) -> Policy {
+    pub fn build(self) -> Policy {
         self.try_build().expect("all set")
     }
 }

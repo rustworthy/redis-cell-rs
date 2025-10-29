@@ -1,6 +1,6 @@
 mod command;
 
-pub use command::{Cmd, Policy};
+pub use command::{Cmd, Policy, PolicyBuilder};
 
 #[cfg(test)]
 mod tests {
