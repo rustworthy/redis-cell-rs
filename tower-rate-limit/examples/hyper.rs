@@ -59,7 +59,7 @@ async fn main() {
         .tokens(1usize)
         .period(Duration::from_secs(1))
         .build();
-    let config = RateLimitConfig::new(IpExtractor, policy);
+    let config = RateLimitConfig::<_, _, Option<()>>::new(IpExtractor, policy, || AppError("rate-limited".to_string()) , None);
 
     let svc = make_service_fn(|_conn| {
         let config = config.clone();

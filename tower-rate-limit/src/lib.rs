@@ -2,35 +2,46 @@ use redis::Cmd as RedisCmd;
 use redis::aio::ConnectionManager;
 use std::{borrow::Cow, pin::Pin};
 
+pub use redis_cell_client::{Cmd, Policy, PolicyBuilder};
+
 pub trait ExtractKey<R> {
     type Error;
 
     fn extract<'a>(&self, req: &'a R) -> Result<Cow<'a, str>, Self::Error>;
 }
 
-pub use redis_cell_client::{Cmd, Policy, PolicyBuilder};
-
 #[derive(Clone)]
-pub struct RateLimitConfig<Ex> {
+pub struct RateLimitConfig<Ex, EH, SH> {
     extractor: Ex,
     policy: Policy,
+    error: EH,
+    success: SH,
 }
 
-impl<Ex> RateLimitConfig<Ex> {
-    pub fn new(extractor: Ex, policy: Policy) -> Self {
-        RateLimitConfig { extractor, policy }
+impl<Ex, EH, SH> RateLimitConfig<Ex, EH, SH> {
+    pub fn new(extractor: Ex, policy: Policy, error_handler: EH, success_handler: SH) -> Self {
+        RateLimitConfig {
+            extractor,
+            policy,
+            error: error_handler,
+            success: success_handler,
+        }
     }
 }
 
 #[derive(Clone)]
-pub struct RateLimit<S, Ex> {
+pub struct RateLimit<S, Ex, EH, SH> {
     inner: S,
-    config: RateLimitConfig<Ex>,
+    config: RateLimitConfig<Ex, EH, SH>,
     connection: ConnectionManager,
 }
 
-impl<S, Ex> RateLimit<S, Ex> {
-    pub fn new(inner: S, config: RateLimitConfig<Ex>, connection: ConnectionManager) -> Self {
+impl<S, Ex, EH, SH> RateLimit<S, Ex, EH, SH> {
+    pub fn new(
+        inner: S,
+        config: RateLimitConfig<Ex, EH, SH>,
+        connection: ConnectionManager,
+    ) -> Self {
         RateLimit {
             inner,
             config,
@@ -39,15 +50,18 @@ impl<S, Ex> RateLimit<S, Ex> {
     }
 }
 
-impl<S, Ex, E, ReqTy> tower::Service<ReqTy> for RateLimit<S, Ex>
+impl<S, Ex, E, EH, SH, ReqTy, RespTy> tower::Service<ReqTy> for RateLimit<S, Ex, EH, SH>
 where
     S: tower::Service<ReqTy> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Send,
     S::Response: Send,
-    Ex: ExtractKey<ReqTy, Error = E>,
+    Ex: ExtractKey<ReqTy, Error = E> + Clone,
     E: Into<S::Response>,
     ReqTy: Send + 'static,
+    EH: Fn() -> RespTy + Clone + Send + 'static,
+    RespTy: Into<S::Response>,
+    SH: Clone,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -72,12 +86,17 @@ where
 
         let mut connection = self.connection.clone();
         let mut inner = self.inner.clone();
+        let config = self.config.clone();
         Box::pin(async move {
             let res = connection.send_packed_command(&cmd).await.unwrap();
             let res = res.into_sequence().unwrap();
             let (throttled, total, remaining, restry_after_sesc, reset_after_secs) =
                 (&res[0], &res[1], &res[2], &res[3], &res[4]);
             dbg!(&res, &throttled);
+            if *throttled == redis::Value::Int(1) {
+                return Ok((config.error)().into());
+            }
+
             let resp = inner.call(req).await;
             resp
         })
