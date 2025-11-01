@@ -1,6 +1,6 @@
 use derive_builder::Builder;
-use redis::Cmd as RedisCmd;
-use std::time::Duration;
+use redis::{Cmd as RedisCmd, ToRedisArgs};
+use std::{num::NonZeroUsize, time::Duration};
 
 #[derive(Clone, Debug, Builder)]
 #[builder(
@@ -10,16 +10,16 @@ use std::time::Duration;
     build_fn(name = "try_build", private)
 )]
 pub struct Policy {
-    #[builder(default = "15")]
+    #[builder(default = 15)]
     pub burst: usize,
 
-    #[builder(default = "30")]
+    #[builder(default = 30)]
     pub tokens: usize,
 
     #[builder(default = "Duration::from_secs(60)")]
     pub period: Duration,
 
-    #[builder(default = "1")]
+    #[builder(default = 1)]
     pub apply: usize,
 }
 
@@ -31,23 +31,27 @@ impl Policy {
 
 impl PolicyBuilder {
     pub fn build(self) -> Policy {
-        self.try_build().expect("all set")
+        self.try_build()
+            .expect("all required fields to have been set")
     }
 }
 
-pub struct Cmd<'a> {
-    key: &'a str,
+pub struct Cmd<'a, K> {
+    key: K,
     policy: &'a Policy,
 }
 
-impl<'a> Cmd<'a> {
-    pub fn new(key: &'a str, policy: &'a Policy) -> Self {
+impl<'a, K> Cmd<'a, K> {
+    pub fn new(key: K, policy: &'a Policy) -> Self {
         Cmd { key, policy }
     }
 }
 
-impl<'a> From<Cmd<'a>> for RedisCmd {
-    fn from(Cmd { key, policy }: Cmd<'a>) -> Self {
+impl<'a, K> From<Cmd<'a, K>> for RedisCmd
+where
+    K: ToRedisArgs,
+{
+    fn from(Cmd { key, policy }: Cmd<'a, K>) -> Self {
         let mut cmd = RedisCmd::new();
         cmd.arg("CL.THROTTLE")
             .arg(key)

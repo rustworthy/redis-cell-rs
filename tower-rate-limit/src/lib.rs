@@ -1,8 +1,13 @@
+use redis::Cmd as RedisCmd;
 use redis::aio::ConnectionManager;
-use redis::{Cmd as RedisCmd, Value};
 use std::{borrow::Cow, pin::Pin, sync::Arc};
 
-pub use redis_cell_client::{Cmd, Policy, PolicyBuilder};
+mod error;
+
+pub use error::{Error, ExtractKeyError};
+pub use redis_cell_rs as redis_cell;
+
+use redis_cell::{AllowedDetails, Cmd, Policy, Verdict};
 
 pub trait ExtractKey<R> {
     type Error;
@@ -10,33 +15,10 @@ pub trait ExtractKey<R> {
     fn extract<'a>(&self, req: &'a R) -> Result<Cow<'a, str>, Self::Error>;
 }
 
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct ExtractKeyError {
-    pub detail: Option<Cow<'static, str>>,
-}
-
-impl ExtractKeyError {
-    pub fn with_detail(detail: Cow<'static, str>) -> Self {
-        ExtractKeyError {
-            detail: Some(detail),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-#[non_exhaustive]
-pub enum Error {
-    Extract(ExtractKeyError),
-    Throttle(i64, i64, i64, i64),
-    Redis,
-    Protocol,
-}
-
 #[derive(Clone)]
 enum SuccessHandler<RespTy> {
     Noop,
-    Handler(Arc<dyn Fn(RespTy) -> RespTy + Send + Sync + 'static>),
+    Handler(Arc<dyn Fn(AllowedDetails, RespTy) -> RespTy + Send + Sync + 'static>),
 }
 
 #[derive(Clone)]
@@ -59,7 +41,7 @@ impl<Ex, EH, RespTy> RateLimitConfig<Ex, EH, RespTy> {
 
     pub fn on_success<H>(mut self, handler: H) -> Self
     where
-        H: Fn(RespTy) -> RespTy + Send + Sync + 'static,
+        H: Fn(AllowedDetails, RespTy) -> RespTy + Send + Sync + 'static,
     {
         self.success = SuccessHandler::Handler(Arc::new(handler));
         self
@@ -121,35 +103,37 @@ where
             }
         };
         let cmd = Cmd::new(&key, &self.config.policy);
-        let cmd: RedisCmd = cmd.into();
-
+        let cmd = RedisCmd::from(cmd);
         let mut connection = self.connection.clone();
         let mut inner = self.inner.clone();
         let config = self.config.clone();
         Box::pin(async move {
-            let res = connection.send_packed_command(&cmd).await.unwrap();
-            let res = res.into_sequence().unwrap();
-            let (
-                Value::Int(throttled),
-                Value::Int(total),
-                Value::Int(remaining),
-                Value::Int(retry_after_sesc),
-                Value::Int(reset_after_secs),
-            ) = (&res[0], &res[1], &res[2], &res[3], &res[4])
-            else {
-                todo!();
+            let redis_response = match connection.send_packed_command(&cmd).await {
+                Ok(res) => res,
+                Err(redis) => {
+                    let handled = (config.error)(Error::Redis(Arc::new(redis)), req);
+                    return Ok(handled.into());
+                }
             };
-            if *throttled == 1 {
-                let handled = (config.error)(
-                    Error::Throttle(*total, *remaining, *retry_after_sesc, *reset_after_secs),
-                    req,
-                );
-                return Ok(handled.into());
+            let redis_cell_verdict: Verdict = match redis_response.try_into() {
+                Ok(verdict) => verdict,
+                Err(message) => {
+                    let handled = (config.error)(Error::Protocol(message), req);
+                    return Ok(handled.into());
+                }
+            };
+            match redis_cell_verdict {
+                Verdict::Blocked(details) => {
+                    let handled = (config.error)(Error::Throttle(details), req);
+                    Ok(handled.into())
+                }
+                Verdict::Allowed(details) => {
+                    inner.call(req).await.map(|resp| match &config.success {
+                        SuccessHandler::Noop => resp,
+                        SuccessHandler::Handler(h) => h(details, resp),
+                    })
+                }
             }
-            inner.call(req).await.map(|resp| match &config.success {
-                SuccessHandler::Noop => resp,
-                SuccessHandler::Handler(h) => h(resp),
-            })
         })
     }
 }

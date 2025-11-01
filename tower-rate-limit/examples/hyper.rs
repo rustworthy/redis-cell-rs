@@ -9,7 +9,8 @@ use std::time::Duration;
 use testcontainers::core::IntoContainerPort as _;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{GenericImage, core::WaitFor};
-use tower_rate_limit::{Error, ExtractKey, ExtractKeyError, Policy, RateLimit, RateLimitConfig};
+use tower_rate_limit::redis_cell::Policy;
+use tower_rate_limit::{Error, ExtractKey, ExtractKeyError, RateLimit, RateLimitConfig};
 
 #[derive(Clone)]
 struct IpExtractor;
@@ -64,12 +65,13 @@ async fn main() {
         .period(Duration::from_secs(3))
         .build();
     let config = RateLimitConfig::new(IpExtractor, policy, |err, _req| match err {
-        Error::Throttle(total, remaining, retry_after, reset_after) => {
-            AppError("rate-limited".to_string())
-        }
-        _ => todo!(),
+        Error::Throttle(_details) => AppError("rate-limited".to_string()),
+        Error::Extract(err) => AppError(format!("uanuthoized: {:?}", err.detail)),
+        Error::Protocol(msg) => AppError(format!("internal server error: {}", msg)),
+        Error::Redis(err) => AppError(format!("internal server error: {:?}", err.detail())),
+        _ => AppError("internal server error".into()),
     })
-    .on_success(|mut resp: Response<Body>| {
+    .on_success(|_details, mut resp: Response<Body>| {
         let headers = resp.headers_mut();
         headers.insert(
             "x-inserted-by-success-handler",

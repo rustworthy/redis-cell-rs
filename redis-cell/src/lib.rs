@@ -1,10 +1,13 @@
 mod command;
+mod verdict;
 
 pub use command::{Cmd, Policy, PolicyBuilder};
+pub use verdict::{AllowedDetails, BlockedDetails, Verdict};
 
 #[cfg(test)]
 mod tests {
-    use crate::{Cmd, Policy};
+    use crate::{Cmd, Policy, Verdict};
+    use std::num::NonZeroUsize;
     use std::time::Duration;
     use testcontainers::core::IntoContainerPort as _;
     use testcontainers::runners::AsyncRunner;
@@ -20,24 +23,22 @@ mod tests {
         let port = container.get_host_port_ipv4(6379).await.unwrap();
         let client = redis::Client::open(("localhost", port)).unwrap();
         let config = redis::aio::ConnectionManagerConfig::new().set_number_of_retries(1);
-        let mut manager = redis::aio::ConnectionManager::new_with_config(client, config)
+        let mut client = redis::aio::ConnectionManager::new_with_config(client, config)
             .await
             .unwrap();
-
-        let mut builder = Policy::builder();
-        let policy = builder
-            .burst(1usize)
-            .tokens(10usize)
+        let policy = Policy::builder()
+            .burst(NonZeroUsize::new(1).unwrap())
+            .tokens(NonZeroUsize::new(10).unwrap())
             .period(Duration::from_secs(60))
-            .apply(1usize)
             .build();
         let cmd = Cmd::new("user123", &policy).into();
-        let res = manager.send_packed_command(&cmd).await.unwrap();
-        dbg!(res);
-        let res = manager.send_packed_command(&cmd).await.unwrap();
-        dbg!(res);
-        let res = manager.send_packed_command(&cmd).await.unwrap();
-        dbg!(res);
+        let verdict: Verdict = client
+            .send_packed_command(&cmd)
+            .await
+            .unwrap()
+            .try_into()
+            .unwrap();
+        dbg!(verdict);
     }
 
     #[tokio::test]
