@@ -1,21 +1,20 @@
 use axum::http::Request;
-use axum::http::{HeaderValue, StatusCode};
+use axum::http::{HeaderValue, Method, StatusCode};
 use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::{Router, body::Body, routing::get};
 use http::header::RETRY_AFTER;
-use std::collections::HashMap;
-use std::time::Duration;
 use tower_rate_limit::redis_cell::Policy;
 use tower_rate_limit::{
     Error, ExtractKeyError, ExtractRule, RateLimitConfig, RateLimitLayer, Rule,
 };
 
-const BASIC_POLICY: Policy = Policy::new(0, 1, Duration::from_secs(3), 1);
+const BASIC_POLICY: Policy = Policy::from_tokens_per_second(1);
+const STRICT_POLICY: Policy = Policy::from_tokens_per_hour(5);
 
 #[derive(Clone)]
-struct ApiKeyExtractor;
+struct RuleExtractor;
 
-impl<T> ExtractRule<Request<T>> for ApiKeyExtractor {
+impl<T> ExtractRule<Request<T>> for RuleExtractor {
     type Error = ExtractKeyError;
     fn extract<'a>(&self, req: &'a Request<T>) -> Result<Option<Rule<'a>>, Self::Error> {
         let key = req
@@ -26,7 +25,12 @@ impl<T> ExtractRule<Request<T>> for ApiKeyExtractor {
             .ok_or(ExtractKeyError::with_detail(
                 "'x-api-key' header is missing".into(),
             ))?;
-        Ok(Some(Rule::new(key, "basic")))
+        let rule = if req.method() == Method::POST {
+            Rule::new(key, STRICT_POLICY)
+        } else {
+            Rule::new(key, BASIC_POLICY)
+        };
+        Ok(Some(rule))
     }
 }
 
@@ -39,9 +43,8 @@ async fn main() {
     // launch a contaier with Valkey (with Redis Cell module)
     let (_container, port) = utils::launch_redis_container().await;
     let connection = utils::build_connection_manager(port).await;
-    let policies = HashMap::from([("basic".to_string(), BASIC_POLICY)]);
 
-    let config = RateLimitConfig::new(ApiKeyExtractor, policies, |err, _req| {
+    let config = RateLimitConfig::new(RuleExtractor, |err, _req| {
         match err {
             Error::Throttle(details) => {
                 // trace event
@@ -54,10 +57,6 @@ async fn main() {
                     .into_response()
             }
             Error::Extract(err) => (StatusCode::UNAUTHORIZED, err.to_string()).into_response(),
-            Error::Rule(err) => {
-                tracing::error!(err = %err, "error in rate limit layer");
-                (StatusCode::INTERNAL_SERVER_ERROR).into_response()
-            }
             Error::RedisCell(err) => {
                 tracing::error!(err = %err, "error in rate limit layer");
                 (StatusCode::INTERNAL_SERVER_ERROR).into_response()

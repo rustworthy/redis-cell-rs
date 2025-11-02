@@ -1,5 +1,5 @@
 use redis::{Cmd as RedisCmd, aio::ConnectionLike};
-use std::{borrow::Cow, collections::HashMap, pin::Pin, sync::Arc};
+use std::{borrow::Cow, pin::Pin, sync::Arc};
 use tower::Layer;
 
 mod error;
@@ -14,12 +14,12 @@ type ReponseEnricher<RespTy> = Arc<dyn Fn(AllowedDetails, &mut RespTy) + Send + 
 #[derive(Debug, Clone)]
 pub struct Rule<'a> {
     key: Cow<'a, str>,
-    policy_name: &'a str,
+    policy: Policy,
 }
 
 impl<'a> Rule<'a> {
-    pub fn new(key: Cow<'a, str>, policy_name: &'a str) -> Self {
-        Self { key, policy_name }
+    pub fn new(key: Cow<'a, str>, policy: Policy) -> Self {
+        Self { key, policy }
     }
 }
 
@@ -38,16 +38,14 @@ enum SuccessHandler<RespTy> {
 #[derive(Clone)]
 pub struct RateLimitConfig<Ex, EH, RespTy> {
     extractor: Ex,
-    policies: HashMap<String, Policy>,
     error_handler: EH,
     success_handler: SuccessHandler<RespTy>,
 }
 
 impl<Ex, EH, RespTy> RateLimitConfig<Ex, EH, RespTy> {
-    pub fn new(extractor: Ex, policies: HashMap<String, Policy>, error_handler: EH) -> Self {
+    pub fn new(extractor: Ex, error_handler: EH) -> Self {
         RateLimitConfig {
             extractor,
-            policies,
             error_handler,
             success_handler: SuccessHandler::Noop,
         }
@@ -133,21 +131,8 @@ where
         };
         let cmd = match rule {
             Some(rule) => {
-                let policy = self.config.policies.get(rule.policy_name);
-                match policy {
-                    Some(policy) => {
-                        let cmd = Cmd::new(&rule.key, policy);
-                        RedisCmd::from(cmd)
-                    }
-                    None => {
-                        let e = Error::Rule(format!(
-                            "failed to apply policy for key '{}': policy '{}' not found",
-                            rule.key, rule.policy_name
-                        ));
-                        let resp = (self.config.error_handler)(e, req);
-                        return Box::pin(std::future::ready(Ok(resp.into())));
-                    }
-                }
+                let cmd = Cmd::new(&rule.key, &rule.policy);
+                RedisCmd::from(cmd)
             }
             None => return Box::pin(self.inner.call(req)),
         };
