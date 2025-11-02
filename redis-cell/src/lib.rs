@@ -2,14 +2,13 @@ mod command;
 mod error;
 mod verdict;
 
-pub use command::{Cmd, Policy, PolicyBuilder};
+pub use command::{Cmd, Policy};
 pub use error::Error;
 pub use verdict::{AllowedDetails, BlockedDetails, Verdict};
 
 #[cfg(test)]
 mod tests {
     use crate::{Cmd, Policy, Verdict};
-    use std::num::NonZeroUsize;
     use std::time::Duration;
     use testcontainers::core::IntoContainerPort as _;
     use testcontainers::runners::AsyncRunner;
@@ -28,11 +27,7 @@ mod tests {
         let mut client = redis::aio::ConnectionManager::new_with_config(client, config)
             .await
             .unwrap();
-        let policy = Policy::builder()
-            .burst(NonZeroUsize::new(1).unwrap())
-            .tokens(NonZeroUsize::new(10).unwrap())
-            .period(Duration::from_secs(60))
-            .build();
+        let policy = Policy::new(1, 10, Duration::from_secs(60), 1);
         let cmd = Cmd::new("user123", &policy).into();
         let verdict: Verdict = client
             .send_packed_command(&cmd)

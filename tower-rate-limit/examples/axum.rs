@@ -10,6 +10,8 @@ use tower_rate_limit::{
     Error, ExtractKeyError, ExtractRule, RateLimitConfig, RateLimitLayer, Rule,
 };
 
+const BASIC_POLICY: Policy = Policy::new(0, 1, Duration::from_secs(3), 1);
+
 #[derive(Clone)]
 struct ApiKeyExtractor;
 
@@ -37,13 +39,7 @@ async fn main() {
     // launch a contaier with Valkey (with Redis Cell module)
     let (_container, port) = utils::launch_redis_container().await;
     let connection = utils::build_connection_manager(port).await;
-
-    let basic_policy = Policy::builder()
-        .burst(0usize)
-        .tokens(1usize)
-        .period(Duration::from_secs(3))
-        .build();
-    let policies = HashMap::from([("basic".to_string(), basic_policy)]);
+    let policies = HashMap::from([("basic".to_string(), BASIC_POLICY)]);
 
     let config = RateLimitConfig::new(ApiKeyExtractor, policies, |err, _req| {
         match err {

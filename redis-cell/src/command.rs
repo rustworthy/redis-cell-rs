@@ -1,38 +1,26 @@
-use derive_builder::Builder;
 use redis::{Cmd as RedisCmd, ToRedisArgs};
 use std::time::Duration;
 
-#[derive(Clone, Debug, Builder)]
-#[builder(
-    pattern = "owned",
-    derive(Debug),
-    setter(into),
-    build_fn(name = "try_build", private)
-)]
+#[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Policy {
-    #[builder(default = 15)]
     pub burst: usize,
 
-    #[builder(default = 30)]
     pub tokens: usize,
 
-    #[builder(default = "Duration::from_secs(60)")]
     pub period: Duration,
 
-    #[builder(default = 1)]
     pub apply: usize,
 }
 
 impl Policy {
-    pub fn builder() -> PolicyBuilder {
-        PolicyBuilder::create_empty()
-    }
-}
-
-impl PolicyBuilder {
-    pub fn build(self) -> Policy {
-        self.try_build()
-            .expect("all required fields to have been set")
+    pub const fn new(burst: usize, tokens: usize, period: Duration, apply: usize) -> Policy {
+        Self {
+            burst,
+            tokens,
+            period,
+            apply,
+        }
     }
 }
 
