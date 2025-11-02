@@ -70,12 +70,15 @@ async fn main() {
         .tokens(1usize)
         .period(Duration::from_secs(3))
         .build();
-    let config = RateLimitConfig::new(IpExtractor, policy, |err, _req| match err {
-        Error::Throttle(_details) => AppError("rate-limited".to_string()),
-        Error::Extract(err) => AppError(format!("uanuthoized: {:?}", err.detail)),
-        Error::Protocol(msg) => AppError(format!("internal server error: {}", msg)),
-        Error::Redis(err) => AppError(format!("internal server error: {:?}", err.detail())),
-        _ => AppError("internal server error".into()),
+    let config = RateLimitConfig::new(IpExtractor, policy, |err, _req| {
+        eprintln!("{}", err);
+        match err {
+            Error::Throttle(_details) => AppError("rate-limited".to_string()),
+            Error::Extract(err) => AppError(format!("uanuthoized: {:?}", err.detail)),
+            Error::RedisCell(err) => AppError(format!("internal server error: {}", err)),
+            Error::Redis(err) => AppError(format!("internal server error: {:?}", err.detail())),
+            _ => AppError("internal server error".into()),
+        }
     })
     .on_success(|_details, resp: &mut Response<Body>| {
         let headers = resp.headers_mut();

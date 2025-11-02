@@ -1,7 +1,9 @@
 mod command;
+mod error;
 mod verdict;
 
 pub use command::{Cmd, Policy, PolicyBuilder};
+pub use error::Error;
 pub use verdict::{AllowedDetails, BlockedDetails, Verdict};
 
 #[cfg(test)]

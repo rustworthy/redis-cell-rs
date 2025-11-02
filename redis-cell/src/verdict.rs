@@ -1,3 +1,4 @@
+use crate::Error;
 use redis::Value as RedisValue;
 
 #[derive(Debug, Clone)]
@@ -24,14 +25,25 @@ pub enum Verdict {
 }
 
 impl TryFrom<RedisValue> for Verdict {
-    type Error = String;
+    type Error = Error;
     fn try_from(value: RedisValue) -> Result<Self, Self::Error> {
-        let res = value.into_sequence().unwrap();
+        let value = value.into_sequence().map_err(|value| {
+            Error::from(format!(
+                "failed to decode Redis Cell response: exapected sequence, but got {:?}",
+                value
+            ))
+        })?;
+
+        if value.len() != 5 {
+            return Err(format!(
+                "failed to decode Redis Cell response: exapected sequence of 5 elements, but got {:?}",
+                value
+            ).into());
+        }
+
         let (throttled, total, remaining, retry_after, reset_after) =
-            (&res[0], &res[1], &res[2], &res[3], &res[4])
-        else {
-            todo!();
-        };
+            (&value[0], &value[1], &value[2], &value[3], &value[4]);
+
         let verdict = if parse_throttled(throttled)? {
             Verdict::Blocked(BlockedDetails {
                 total: try_to_usize("total", total)?,

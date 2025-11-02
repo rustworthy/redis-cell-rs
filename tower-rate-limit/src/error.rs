@@ -1,11 +1,24 @@
 use redis::RedisError;
 use redis_cell_rs::BlockedDetails;
+use redis_cell_rs::Error as RedisCellError;
+use std::fmt::Display;
 use std::{borrow::Cow, sync::Arc};
 
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct ExtractKeyError {
     pub detail: Option<Cow<'static, str>>,
+}
+
+impl Display for ExtractKeyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("failed to extract key")?;
+        if let Some(ref detail) = self.detail {
+            f.write_str(": ")?;
+            f.write_str(detail)?;
+        }
+        Ok(())
+    }
 }
 
 impl ExtractKeyError {
@@ -28,11 +41,18 @@ impl From<&'static str> for ExtractKeyError {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error("extraction: {0}")]
     Extract(ExtractKeyError),
-    Throttle(BlockedDetails),
+
+    #[error(transparent)]
+    RedisCell(RedisCellError),
+
+    #[error(transparent)]
     Redis(Arc<RedisError>),
-    Protocol(String),
+
+    #[error("request blocked and can be retied after {} second(s)", .0.retry_after)]
+    Throttle(BlockedDetails),
 }

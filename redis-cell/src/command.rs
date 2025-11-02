@@ -1,6 +1,6 @@
 use derive_builder::Builder;
 use redis::{Cmd as RedisCmd, ToRedisArgs};
-use std::{num::NonZeroUsize, time::Duration};
+use std::time::Duration;
 
 #[derive(Clone, Debug, Builder)]
 #[builder(

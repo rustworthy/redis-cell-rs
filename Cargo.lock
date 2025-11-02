@@ -1496,6 +1496,7 @@ dependencies = [
  "derive_builder",
  "redis",
  "testcontainers",
+ "thiserror",
  "tokio",
 ]
 
@@ -2149,6 +2150,7 @@ dependencies = [
  "redis",
  "redis-cell-rs",
  "testcontainers",
+ "thiserror",
  "tokio",
  "tower",
 ]

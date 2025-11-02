@@ -122,7 +122,7 @@ where
             let redis_cell_verdict: Verdict = match redis_response.try_into() {
                 Ok(verdict) => verdict,
                 Err(message) => {
-                    let handled = (config.error_handler)(Error::Protocol(message), req);
+                    let handled = (config.error_handler)(Error::RedisCell(message), req);
                     return Ok(handled.into());
                 }
             };
