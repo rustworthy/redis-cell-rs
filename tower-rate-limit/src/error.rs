@@ -6,13 +6,13 @@ use std::{borrow::Cow, sync::Arc};
 
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct ExtractKeyError {
+pub struct ProvideRuleError {
     pub detail: Option<Cow<'static, str>>,
 }
 
-impl Display for ExtractKeyError {
+impl Display for ProvideRuleError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("failed to extract key")?;
+        f.write_str("failed to provide rule")?;
         if let Some(ref detail) = self.detail {
             f.write_str(": ")?;
             f.write_str(detail)?;
@@ -21,31 +21,31 @@ impl Display for ExtractKeyError {
     }
 }
 
-impl ExtractKeyError {
+impl ProvideRuleError {
     pub fn with_detail(detail: Cow<'static, str>) -> Self {
-        ExtractKeyError {
+        ProvideRuleError {
             detail: Some(detail),
         }
     }
 }
 
-impl From<String> for ExtractKeyError {
+impl From<String> for ProvideRuleError {
     fn from(value: String) -> Self {
-        ExtractKeyError::with_detail(value.into())
+        ProvideRuleError::with_detail(value.into())
     }
 }
 
-impl From<&'static str> for ExtractKeyError {
+impl From<&'static str> for ProvideRuleError {
     fn from(value: &'static str) -> Self {
-        ExtractKeyError::with_detail(value.into())
+        ProvideRuleError::with_detail(value.into())
     }
 }
 
 #[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("extraction: {0}")]
-    Extract(ExtractKeyError),
+    #[error("rule: {0}")]
+    Rule(ProvideRuleError),
 
     #[error(transparent)]
     RedisCell(RedisCellError),

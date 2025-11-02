@@ -5,25 +5,25 @@ use axum::{Router, body::Body, routing::get};
 use http::header::RETRY_AFTER;
 use tower_rate_limit::redis_cell::Policy;
 use tower_rate_limit::{
-    Error, ExtractKeyError, ExtractRule, RateLimitConfig, RateLimitLayer, Rule,
+    Error, ProvideRule, ProvideRuleError, RateLimitConfig, RateLimitLayer, Rule,
 };
 
 const BASIC_POLICY: Policy = Policy::from_tokens_per_second(1);
 const STRICT_POLICY: Policy = Policy::from_tokens_per_hour(5);
 
 #[derive(Clone)]
-struct RuleExtractor;
+struct RuleProvider;
 
-impl<T> ExtractRule<Request<T>> for RuleExtractor {
-    type Error = ExtractKeyError;
-    fn extract<'a>(&self, req: &'a Request<T>) -> Result<Option<Rule<'a>>, Self::Error> {
+impl<T> ProvideRule<Request<T>> for RuleProvider {
+    type Error = ProvideRuleError;
+    fn provide<'a>(&self, req: &'a Request<T>) -> Result<Option<Rule<'a>>, Self::Error> {
         let key = req
             .headers()
             .get("x-api-key")
             .and_then(|val| val.to_str().ok())
             .map(Into::into)
-            .ok_or(ExtractKeyError::with_detail(
-                "'x-api-key' header is missing".into(),
+            .ok_or(ProvideRuleError::with_detail(
+                "cannot define key, since 'x-api-key' header is missing".into(),
             ))?;
         let rule = if req.method() == Method::POST {
             Rule::new(key, STRICT_POLICY)
@@ -44,10 +44,9 @@ async fn main() {
     let (_container, port) = utils::launch_redis_container().await;
     let connection = utils::build_connection_manager(port).await;
 
-    let config = RateLimitConfig::new(RuleExtractor, |err, _req| {
+    let config = RateLimitConfig::new(RuleProvider, |err, _req| {
         match err {
             Error::Throttle(details) => {
-                // trace event
                 (
                     StatusCode::TOO_MANY_REQUESTS,
                     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After
@@ -56,7 +55,7 @@ async fn main() {
                 )
                     .into_response()
             }
-            Error::Extract(err) => (StatusCode::UNAUTHORIZED, err.to_string()).into_response(),
+            Error::Rule(err) => (StatusCode::UNAUTHORIZED, err.to_string()).into_response(),
             Error::RedisCell(err) => {
                 tracing::error!(err = %err, "error in rate limit layer");
                 (StatusCode::INTERNAL_SERVER_ERROR).into_response()

@@ -4,7 +4,7 @@ use tower::Layer;
 
 mod error;
 
-pub use error::{Error, ExtractKeyError};
+pub use error::{Error, ProvideRuleError};
 pub use redis_cell_rs as redis_cell;
 
 use redis_cell::{AllowedDetails, Cmd, Policy, Verdict};
@@ -23,10 +23,10 @@ impl<'a> Rule<'a> {
     }
 }
 
-pub trait ExtractRule<R> {
+pub trait ProvideRule<R> {
     type Error;
 
-    fn extract<'a>(&self, req: &'a R) -> Result<Option<Rule<'a>>, Self::Error>;
+    fn provide<'a>(&self, req: &'a R) -> Result<Option<Rule<'a>>, Self::Error>;
 }
 
 #[derive(Clone)]
@@ -36,16 +36,16 @@ enum SuccessHandler<RespTy> {
 }
 
 #[derive(Clone)]
-pub struct RateLimitConfig<Ex, EH, RespTy> {
-    extractor: Ex,
+pub struct RateLimitConfig<PR, EH, RespTy> {
+    rule_provider: PR,
     error_handler: EH,
     success_handler: SuccessHandler<RespTy>,
 }
 
-impl<Ex, EH, RespTy> RateLimitConfig<Ex, EH, RespTy> {
-    pub fn new(extractor: Ex, error_handler: EH) -> Self {
+impl<RP, EH, RespTy> RateLimitConfig<RP, EH, RespTy> {
+    pub fn new(rule_provider: RP, error_handler: EH) -> Self {
         RateLimitConfig {
-            extractor,
+            rule_provider,
             error_handler,
             success_handler: SuccessHandler::Noop,
         }
@@ -61,13 +61,13 @@ impl<Ex, EH, RespTy> RateLimitConfig<Ex, EH, RespTy> {
 }
 
 // ############################## SERVICE ####################################
-pub struct RateLimit<S, Ex, EH, RespTy, C> {
+pub struct RateLimit<S, PR, EH, RespTy, C> {
     inner: S,
-    config: Arc<RateLimitConfig<Ex, EH, RespTy>>,
+    config: Arc<RateLimitConfig<PR, EH, RespTy>>,
     connection: C, // e.g. `ConnectionManager`
 }
 
-impl<S, Ex, EH, RespTy, C> Clone for RateLimit<S, Ex, EH, RespTy, C>
+impl<S, PR, EH, RespTy, C> Clone for RateLimit<S, PR, EH, RespTy, C>
 where
     S: Clone,
     C: Clone,
@@ -81,10 +81,10 @@ where
     }
 }
 
-impl<S, Ex, EH, SH, C> RateLimit<S, Ex, EH, SH, C> {
+impl<S, PR, EH, SH, C> RateLimit<S, PR, EH, SH, C> {
     pub fn new<RLC>(inner: S, config: RLC, connection: C) -> Self
     where
-        RLC: Into<Arc<RateLimitConfig<Ex, EH, SH>>>,
+        RLC: Into<Arc<RateLimitConfig<PR, EH, SH>>>,
     {
         RateLimit {
             inner,
@@ -94,15 +94,15 @@ impl<S, Ex, EH, SH, C> RateLimit<S, Ex, EH, SH, C> {
     }
 }
 
-impl<S, Ex, E, EH, RespTy, ReqTy, IntoRespTy, C> tower::Service<ReqTy>
-    for RateLimit<S, Ex, EH, RespTy, C>
+impl<S, PR, E, EH, RespTy, ReqTy, IntoRespTy, C> tower::Service<ReqTy>
+    for RateLimit<S, PR, EH, RespTy, C>
 where
     S: tower::Service<ReqTy, Response = RespTy> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Send,
     S::Response: Send,
-    Ex: ExtractRule<ReqTy, Error = E> + Clone + Send + Sync + 'static,
-    E: Into<ExtractKeyError>,
+    PR: ProvideRule<ReqTy, Error = E> + Clone + Send + Sync + 'static,
+    E: Into<ProvideRuleError>,
     ReqTy: Send + 'static,
     EH: Fn(Error, ReqTy) -> IntoRespTy + Clone + Send + Sync + 'static,
     IntoRespTy: Into<RespTy>,
@@ -121,10 +121,10 @@ where
     }
 
     fn call(&mut self, req: ReqTy) -> Self::Future {
-        let rule = match self.config.extractor.extract(&req) {
+        let rule = match self.config.rule_provider.provide(&req) {
             Ok(rule) => rule,
             Err(e) => {
-                let e = Error::Extract(e.into());
+                let e = Error::Rule(e.into());
                 let resp = (self.config.error_handler)(e, req);
                 return Box::pin(std::future::ready(Ok(resp.into())));
             }
@@ -177,12 +177,12 @@ where
 }
 
 // ############################## LAYER ######################################
-pub struct RateLimitLayer<Ex, EH, RespTy, C> {
-    config: Arc<RateLimitConfig<Ex, EH, RespTy>>,
+pub struct RateLimitLayer<PR, EH, RespTy, C> {
+    config: Arc<RateLimitConfig<PR, EH, RespTy>>,
     connection: C,
 }
 
-impl<Ex, EH, RespTy, C> Clone for RateLimitLayer<Ex, EH, RespTy, C>
+impl<PR, EH, RespTy, C> Clone for RateLimitLayer<PR, EH, RespTy, C>
 where
     C: Clone,
 {
@@ -194,20 +194,20 @@ where
     }
 }
 
-impl<S, Ex, EH, RespTy, C> Layer<S> for RateLimitLayer<Ex, EH, RespTy, C>
+impl<S, PR, EH, RespTy, C> Layer<S> for RateLimitLayer<PR, EH, RespTy, C>
 where
     C: Clone,
 {
-    type Service = RateLimit<S, Ex, EH, RespTy, C>;
+    type Service = RateLimit<S, PR, EH, RespTy, C>;
     fn layer(&self, inner: S) -> Self::Service {
         RateLimit::new(inner, Arc::clone(&self.config), self.connection.clone())
     }
 }
 
-impl<Ex, EH, RespTy, C> RateLimitLayer<Ex, EH, RespTy, C> {
+impl<PR, EH, RespTy, C> RateLimitLayer<PR, EH, RespTy, C> {
     pub fn new<RLC>(config: RLC, connection: C) -> Self
     where
-        RLC: Into<Arc<RateLimitConfig<Ex, EH, RespTy>>>,
+        RLC: Into<Arc<RateLimitConfig<PR, EH, RespTy>>>,
     {
         RateLimitLayer {
             config: config.into(),
