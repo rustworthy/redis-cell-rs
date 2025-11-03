@@ -1,4 +1,4 @@
-use redis::{Cmd as RedisCmd, aio::ConnectionLike};
+use redis::aio::ConnectionLike;
 use std::{borrow::Cow, pin::Pin, sync::Arc};
 use tower::Layer;
 
@@ -134,28 +134,27 @@ where
     }
 
     fn call(&mut self, req: ReqTy) -> Self::Future {
-        let maybe_rule = match self.config.rule_provider.provide(&req) {
-            Ok(rule) => rule,
-            Err(e) => {
-                let e = Error::Rule(e.into());
-                let OnError::Sync(ref h) = self.config.on_error;
-                let resp = h(e, req);
-                return Box::pin(std::future::ready(Ok(resp.into())));
-            }
-        };
-        let rule = match maybe_rule {
-            Some(rule) => rule,
-            None => return Box::pin(self.inner.call(req)),
-        };
-        let cmd = Cmd::new(&rule.key, &rule.policy);
-        let cmd = RedisCmd::from(cmd);
-
         let mut connection = self.connection.clone();
         let mut inner = self.inner.clone();
         let config = self.config.clone();
-        let policy = rule.policy;
+
         Box::pin(async move {
-            let redis_response = match connection.req_packed_command(&cmd).await {
+            let maybe_rule = match config.rule_provider.provide(&req) {
+                Ok(rule) => rule,
+                Err(e) => {
+                    let e = Error::Rule(e.into());
+                    let OnError::Sync(ref h) = config.on_error;
+                    let resp = h(e, req);
+                    return Ok(resp.into());
+                }
+            };
+            let rule = match maybe_rule {
+                Some(rule) => rule,
+                None => return inner.call(req).await,
+            };
+            let cmd = Cmd::new(&rule.key, &rule.policy);
+
+            let redis_response = match connection.req_packed_command(&cmd.into()).await {
                 Ok(res) => res,
                 Err(redis) => {
                     let OnError::Sync(ref h) = config.on_error;
@@ -175,7 +174,10 @@ where
                 Verdict::Blocked(details) => {
                     let OnError::Sync(ref h) = config.on_error;
                     let handled = h(
-                        Error::RateLimit(RequestThrottledError { details, policy }),
+                        Error::RateLimit(RequestThrottledError {
+                            details,
+                            policy: rule.policy,
+                        }),
                         req,
                     );
                     Ok(handled.into())

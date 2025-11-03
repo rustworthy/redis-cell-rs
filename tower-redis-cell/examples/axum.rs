@@ -3,8 +3,7 @@ use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::{Router, body::Body, routing::get};
 use tower_redis_cell::redis_cell::Policy;
 use tower_redis_cell::{
-    Error, ProvideRule, ProvideRuleError, RateLimitConfig, RateLimitLayer, RequestThrottledError,
-    Rule,
+    Error, ProvideRule, ProvideRuleError, RateLimitConfig, RateLimitLayer, Rule,
 };
 
 const BASIC_POLICY: Policy = Policy::from_tokens_per_second(1).name("basic");
@@ -70,6 +69,7 @@ async fn main() {
             }
         }
     })
+    // optional success handler
     .on_success(|_details, resp: &mut Response<Body>| {
         let headers = resp.headers_mut();
         headers.insert(
