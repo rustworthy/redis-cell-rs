@@ -5,9 +5,9 @@ use tower::Layer;
 mod error;
 mod rule;
 
-pub use error::{Error, ProvideRuleError};
+pub use error::{Error, ProvideRuleError, RequestBlockedDetails};
 pub use redis_cell_rs as redis_cell;
-pub use rule::{ProvideRule, RequestAllowedDetails, RequestBlockedDetails, Rule};
+pub use rule::{ProvideRule, Rule};
 
 use redis_cell::{AllowedDetails, Cmd, Policy, Verdict};
 
@@ -184,11 +184,7 @@ where
                 Verdict::Blocked(details) => {
                     let OnError::Sync(ref h) = config.on_error;
                     let handled = h(
-                        Error::RateLimit(RequestBlockedDetails {
-                            key: &rule.key,
-                            policy,
-                            details,
-                        }),
+                        Error::RateLimit(RequestBlockedDetails { rule, details }),
                         &req,
                     );
                     Ok(handled.into())

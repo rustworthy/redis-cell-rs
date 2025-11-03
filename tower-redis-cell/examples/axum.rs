@@ -45,7 +45,11 @@ async fn main() {
     let config = RateLimitConfig::new(RuleProvider, |err, _req| {
         match err {
             Error::RateLimit(err) => {
-                tracing::warn!(key = err.key, policy = err.policy.name, "request throttled");
+                tracing::warn!(
+                    key = err.rule.key.as_ref(),
+                    policy = err.rule.policy.name,
+                    "request throttled"
+                );
                 (
                     StatusCode::TOO_MANY_REQUESTS,
                     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After
