@@ -9,11 +9,6 @@ pub use redis_cell_rs as redis_cell;
 
 use redis_cell::{AllowedDetails, Cmd, Policy, Verdict};
 
-type SyncSuccessHandler<RespTy> = Box<dyn Fn(AllowedDetails, &mut RespTy) + Send + Sync + 'static>;
-
-type SyncErrorHandler<ReqTy, IntoRespTy> =
-    Box<dyn Fn(Error, ReqTy) -> IntoRespTy + Send + Sync + 'static>;
-
 #[derive(Debug, Clone)]
 pub struct Rule<'a> {
     key: Cow<'a, str>,
@@ -38,19 +33,35 @@ pub trait ProvideRule<R> {
     fn provide<'a>(&self, req: &'a R) -> Result<Option<Rule<'a>>, Self::Error>;
 }
 
+// ############################### HANDLERS ##################################
+type SyncSuccessHandler<RespTy> =
+    Box<dyn Fn(AllowedDetails, &mut RespTy, Policy) + Send + Sync + 'static>;
+
+type SyncUnruledHandler<RespTy> = Box<dyn Fn(&mut RespTy) + Send + Sync + 'static>;
+
+type SyncErrorHandler<ReqTy, IntoRespTy> =
+    Box<dyn Fn(Error, ReqTy) -> IntoRespTy + Send + Sync + 'static>;
+
 enum OnSuccess<RespTy> {
     Noop,
     Sync(SyncSuccessHandler<RespTy>),
+}
+
+enum OnUnruled<RespTy> {
+    Noop,
+    Sync(SyncUnruledHandler<RespTy>),
 }
 
 enum OnError<ReqTy, IntoRespTy> {
     Sync(SyncErrorHandler<ReqTy, IntoRespTy>),
 }
 
+// ############################### CONFIG ####################################
 pub struct RateLimitConfig<PR, ReqTy, RespTy, IntoRespTy> {
     rule_provider: PR,
     on_error: OnError<ReqTy, IntoRespTy>,
     on_success: OnSuccess<RespTy>,
+    on_unruled: OnUnruled<RespTy>,
 }
 
 impl<RP, ReqTy, RespTy, IntoRespTy> RateLimitConfig<RP, ReqTy, RespTy, IntoRespTy> {
@@ -62,14 +73,23 @@ impl<RP, ReqTy, RespTy, IntoRespTy> RateLimitConfig<RP, ReqTy, RespTy, IntoRespT
             rule_provider,
             on_error: OnError::Sync(Box::new(error_handler)),
             on_success: OnSuccess::Noop,
+            on_unruled: OnUnruled::Noop,
         }
     }
 
     pub fn on_success<H>(mut self, handler: H) -> Self
     where
-        H: Fn(AllowedDetails, &mut RespTy) + Send + Sync + 'static,
+        H: Fn(AllowedDetails, &mut RespTy, Policy) + Send + Sync + 'static,
     {
         self.on_success = OnSuccess::Sync(Box::new(handler));
+        self
+    }
+
+    pub fn on_unruled<H>(mut self, handler: H) -> Self
+    where
+        H: Fn(&mut RespTy) + Send + Sync + 'static,
+    {
+        self.on_unruled = OnUnruled::Sync(Box::new(handler));
         self
     }
 }
@@ -150,9 +170,21 @@ where
             };
             let rule = match maybe_rule {
                 Some(rule) => rule,
-                None => return inner.call(req).await,
+                None => {
+                    return inner
+                        .call(req)
+                        .await
+                        .map(|mut resp| match &config.on_unruled {
+                            OnUnruled::Noop => resp,
+                            OnUnruled::Sync(h) => {
+                                h(&mut resp);
+                                resp
+                            }
+                        });
+                }
             };
-            let cmd = Cmd::new(&rule.key, &rule.policy);
+            let policy = rule.policy;
+            let cmd = Cmd::new(&rule.key, &policy);
 
             let redis_response = match connection.req_packed_command(&cmd.into()).await {
                 Ok(res) => res,
@@ -174,10 +206,7 @@ where
                 Verdict::Blocked(details) => {
                     let OnError::Sync(ref h) = config.on_error;
                     let handled = h(
-                        Error::RateLimit(RequestThrottledError {
-                            details,
-                            policy: rule.policy,
-                        }),
+                        Error::RateLimit(RequestThrottledError { details, policy }),
                         req,
                     );
                     Ok(handled.into())
@@ -189,7 +218,7 @@ where
                         .map(|mut resp| match &config.on_success {
                             OnSuccess::Noop => resp,
                             OnSuccess::Sync(h) => {
-                                h(details, &mut resp);
+                                h(details, &mut resp, policy);
                                 resp
                             }
                         })

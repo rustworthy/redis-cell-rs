@@ -70,12 +70,16 @@ async fn main() {
         }
     })
     // optional success handler
-    .on_success(|_details, resp: &mut Response<Body>| {
+    .on_success(|_details, resp: &mut Response<Body>, _| {
         let headers = resp.headers_mut();
         headers.insert(
             "x-inserted-by-success-handler",
             HeaderValue::from_static("<3"),
         );
+    })
+    // optional unruled handler (no rule was returned for this request)
+    .on_unruled(|_resp: &mut Response<Body>| {
+        //
     });
 
     // build our application with a single route
