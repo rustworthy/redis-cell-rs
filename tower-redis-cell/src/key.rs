@@ -8,7 +8,9 @@ pub enum Key<'a> {
     Str(&'a str),
     Usize(usize),
     Isize(isize),
-    // TODO: Uuid behind feature flag
+
+    #[cfg(feature = "uuid")]
+    Uuid(uuid::Uuid),
 }
 
 impl<'a> From<&'a str> for Key<'a> {
@@ -27,9 +29,11 @@ impl Display for Key<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::String(value) => value.fmt(f),
-            Self::Str(value) => value.fmt(f),
+            Self::Str(value) => (*value).fmt(f),
             Self::Usize(value) => value.fmt(f),
             Self::Isize(value) => value.fmt(f),
+            #[cfg(feature = "uuid")]
+            Self::Uuid(value) => value.fmt(f),
         }
     }
 }
@@ -41,9 +45,11 @@ impl ToRedisArgs for Key<'_> {
     {
         match self {
             Self::String(value) => value.write_redis_args(out),
-            Self::Str(value) => value.write_redis_args(out),
+            Self::Str(value) => (*value).write_redis_args(out),
             Self::Usize(value) => value.write_redis_args(out),
             Self::Isize(value) => value.write_redis_args(out),
+            #[cfg(feature = "uuid")]
+            Self::Uuid(value) => value.write_redis_args(out),
         }
     }
 }

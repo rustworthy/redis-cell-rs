@@ -11,8 +11,6 @@ pub use key::Key;
 pub use redis_cell_rs as redis_cell;
 pub use rule::{ProvideRule, RequestAllowedDetails, RequestBlockedDetails, Rule};
 
-use redis_cell::{AllowedDetails, Cmd, Policy, Verdict};
-
 // ############################### HANDLERS ##################################
 type SyncSuccessHandler<RespTy> =
     Box<dyn Fn(RequestAllowedDetails, &mut RespTy) + Send + Sync + 'static>;
@@ -164,7 +162,7 @@ where
                 }
             };
             let policy = rule.policy;
-            let cmd = Cmd::new(&rule.key, &policy);
+            let cmd = redis_cell::Cmd::new(&rule.key, &policy);
 
             let redis_response = match connection.req_packed_command(&cmd.into()).await {
                 Ok(res) => res,
@@ -174,7 +172,7 @@ where
                     return Ok(handled.into());
                 }
             };
-            let redis_cell_verdict: Verdict = match redis_response.try_into() {
+            let redis_cell_verdict = match redis_response.try_into() {
                 Ok(verdict) => verdict,
                 Err(message) => {
                     let OnError::Sync(ref h) = config.on_error;
@@ -183,7 +181,7 @@ where
                 }
             };
             match redis_cell_verdict {
-                Verdict::Blocked(details) => {
+                redis_cell::Verdict::Blocked(details) => {
                     let OnError::Sync(ref h) = config.on_error;
                     let handled = h(
                         Error::RateLimit(RequestBlockedDetails { rule, details }),
@@ -191,7 +189,7 @@ where
                     );
                     Ok(handled.into())
                 }
-                Verdict::Allowed(details) => {
+                redis_cell::Verdict::Allowed(details) => {
                     let policy = rule.policy;
                     let resource = rule.resource;
                     inner

@@ -1,5 +1,6 @@
-use axum::http::{HeaderName, HeaderValue, Method, Request, StatusCode, header};
+use axum::http::{Method, Request, StatusCode, header};
 use axum::response::{AppendHeaders, IntoResponse, Response};
+use axum::routing::post;
 use axum::{Router, body::Body, routing::get};
 use tower_redis_cell::redis_cell::Policy;
 use tower_redis_cell::{
@@ -48,17 +49,13 @@ async fn main() {
                 tracing::warn!(
                     key = %err.rule.key,
                     policy = err.rule.policy.name,
+                    resource = err.rule.resource,
                     "request throttled"
                 );
                 (
                     StatusCode::TOO_MANY_REQUESTS,
                     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After
                     AppendHeaders([(header::RETRY_AFTER, err.details.retry_after)]),
-                    // https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28#checking-the-status-of-your-rate-limit
-                    AppendHeaders([(
-                        HeaderName::from_static("x-ratelimit-resource"),
-                        HeaderValue::from_static(err.rule.resource.unwrap()),
-                    )]),
                     Body::from("too many requests"),
                 )
                     .into_response()
@@ -91,6 +88,10 @@ async fn main() {
     // build our application with a single route
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
+        .route(
+            "/articles",
+            post(|| async { "will use OpenAI content moderation endpoint" }),
+        )
         .layer(RateLimitLayer::new(config, connection));
 
     // run our app with hyper, listening globally on port 3000
