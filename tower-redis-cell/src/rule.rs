@@ -1,22 +1,29 @@
-use redis_cell_rs::Policy;
-use std::borrow::Cow;
+use crate::key::Key;
+use redis_cell_rs::{AllowedDetails, BlockedDetails, Policy};
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Rule<'a> {
-    pub key: Cow<'a, str>,
+    pub key: Key<'a>,
     pub policy: Policy,
+    pub resource: Option<&'static str>,
 }
 
 impl<'a> Rule<'a> {
     pub fn new<K>(key: K, policy: Policy) -> Self
     where
-        K: Into<Cow<'a, str>>,
+        K: Into<Key<'a>>,
     {
         Self {
             key: key.into(),
             policy,
+            resource: None,
         }
+    }
+
+    pub fn resource(mut self, resource_name: &'static str) -> Self {
+        self.resource = Some(resource_name);
+        self
     }
 }
 
@@ -24,4 +31,19 @@ pub trait ProvideRule<R> {
     type Error;
 
     fn provide<'a>(&self, req: &'a R) -> Result<Option<Rule<'a>>, Self::Error>;
+}
+
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct RequestBlockedDetails<'a> {
+    pub details: BlockedDetails,
+    pub rule: Rule<'a>,
+}
+
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct RequestAllowedDetails {
+    pub details: AllowedDetails,
+    pub policy: Policy,
+    pub resource: Option<&'static str>,
 }

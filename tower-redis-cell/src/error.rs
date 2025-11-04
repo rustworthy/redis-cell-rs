@@ -1,9 +1,8 @@
+use crate::rule::RequestBlockedDetails;
 use redis::RedisError;
-use redis_cell_rs::{BlockedDetails, Error as RedisCellError};
+use redis_cell_rs::Error as RedisCellError;
 use std::fmt::Display;
 use std::{borrow::Cow, sync::Arc};
-
-use crate::Rule;
 
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
@@ -40,13 +39,6 @@ impl From<&'static str> for ProvideRuleError {
     fn from(value: &'static str) -> Self {
         ProvideRuleError::with_detail(value.into())
     }
-}
-
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct RequestBlockedDetails<'a> {
-    pub rule: Rule<'a>,
-    pub details: BlockedDetails,
 }
 
 #[derive(Clone, Debug, thiserror::Error)]

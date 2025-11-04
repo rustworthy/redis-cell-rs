@@ -1,4 +1,4 @@
-use axum::http::{HeaderValue, Method, Request, StatusCode, header};
+use axum::http::{HeaderName, HeaderValue, Method, Request, StatusCode, header};
 use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::{Router, body::Body, routing::get};
 use tower_redis_cell::redis_cell::Policy;
@@ -23,8 +23,8 @@ impl<T> ProvideRule<Request<T>> for RuleProvider {
             .ok_or(ProvideRuleError::with_detail(
                 "cannot define key, since 'x-api-key' header is missing".into(),
             ))?;
-        let rule = if req.method() == Method::POST {
-            Rule::new(key, STRICT_POLICY)
+        let rule = if req.method() == Method::POST && req.uri().path().contains("/articles") {
+            Rule::new(key, STRICT_POLICY).resource("articles::write")
         } else {
             Rule::new(key, BASIC_POLICY)
         };
@@ -46,7 +46,7 @@ async fn main() {
         match err {
             Error::RateLimit(err) => {
                 tracing::warn!(
-                    key = err.rule.key.as_ref(),
+                    key = %err.rule.key,
                     policy = err.rule.policy.name,
                     "request throttled"
                 );
@@ -54,6 +54,11 @@ async fn main() {
                     StatusCode::TOO_MANY_REQUESTS,
                     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After
                     AppendHeaders([(header::RETRY_AFTER, err.details.retry_after)]),
+                    // https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28#checking-the-status-of-your-rate-limit
+                    AppendHeaders([(
+                        HeaderName::from_static("x-ratelimit-resource"),
+                        HeaderValue::from_static(err.rule.resource.unwrap()),
+                    )]),
                     Body::from("too many requests"),
                 )
                     .into_response()
@@ -74,12 +79,9 @@ async fn main() {
         }
     })
     // optional success handler
-    .on_success(|_details, resp: &mut Response<Body>, _| {
-        let headers = resp.headers_mut();
-        headers.insert(
-            "x-inserted-by-success-handler",
-            HeaderValue::from_static("<3"),
-        );
+    .on_success(|_details, resp: &mut Response<Body>| {
+        let _headers = resp.headers_mut();
+        //
     })
     // optional unruled handler (no rule was returned for this request)
     .on_unruled(|_resp: &mut Response<Body>| {

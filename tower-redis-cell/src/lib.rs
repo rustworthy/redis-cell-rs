@@ -3,17 +3,19 @@ use std::{pin::Pin, sync::Arc};
 use tower::Layer;
 
 mod error;
+mod key;
 mod rule;
 
-pub use error::{Error, ProvideRuleError, RequestBlockedDetails};
+pub use error::{Error, ProvideRuleError};
+pub use key::Key;
 pub use redis_cell_rs as redis_cell;
-pub use rule::{ProvideRule, Rule};
+pub use rule::{ProvideRule, RequestAllowedDetails, RequestBlockedDetails, Rule};
 
 use redis_cell::{AllowedDetails, Cmd, Policy, Verdict};
 
 // ############################### HANDLERS ##################################
 type SyncSuccessHandler<RespTy> =
-    Box<dyn Fn(AllowedDetails, &mut RespTy, Policy) + Send + Sync + 'static>;
+    Box<dyn Fn(RequestAllowedDetails, &mut RespTy) + Send + Sync + 'static>;
 
 type SyncUnruledHandler<RespTy> = Box<dyn Fn(&mut RespTy) + Send + Sync + 'static>;
 
@@ -57,7 +59,7 @@ impl<RP, ReqTy, RespTy, IntoRespTy> RateLimitConfig<RP, ReqTy, RespTy, IntoRespT
 
     pub fn on_success<H>(mut self, handler: H) -> Self
     where
-        H: Fn(AllowedDetails, &mut RespTy, Policy) + Send + Sync + 'static,
+        H: Fn(RequestAllowedDetails, &mut RespTy) + Send + Sync + 'static,
     {
         self.on_success = OnSuccess::Sync(Box::new(handler));
         self
@@ -190,13 +192,20 @@ where
                     Ok(handled.into())
                 }
                 Verdict::Allowed(details) => {
+                    let policy = rule.policy;
+                    let resource = rule.resource;
                     inner
                         .call(req)
                         .await
                         .map(|mut resp| match &config.on_success {
                             OnSuccess::Noop => resp,
                             OnSuccess::Sync(h) => {
-                                h(details, &mut resp, policy);
+                                let details = RequestAllowedDetails {
+                                    details,
+                                    policy,
+                                    resource,
+                                };
+                                h(details, &mut resp);
                                 resp
                             }
                         })
