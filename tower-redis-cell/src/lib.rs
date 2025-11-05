@@ -117,4 +117,9 @@ pub use rule::{
 };
 pub use service::{RateLimit, RateLimitLayer};
 
+#[cfg(feature = "deadpool")]
+pub mod pooled {
+    pub use crate::service::deadpool::{RateLimit, RateLimitLayer};
+}
+
 pub use redis_cell_rs as redis_cell;

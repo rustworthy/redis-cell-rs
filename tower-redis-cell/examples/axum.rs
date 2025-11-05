@@ -3,9 +3,7 @@ use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::routing::post;
 use axum::{Router, body::Body, routing::get};
 use tower_redis_cell::redis_cell::Policy;
-use tower_redis_cell::{
-    Error, ProvideRule, ProvideRuleResult, RateLimitConfig, RateLimitLayer, Rule,
-};
+use tower_redis_cell::{Error, ProvideRule, ProvideRuleResult, RateLimitConfig, Rule};
 
 const BASIC_POLICY: Policy = Policy::from_tokens_per_second(1).name("basic");
 const STRICT_POLICY: Policy = Policy::from_tokens_per_hour(5).name("strict");
@@ -37,7 +35,6 @@ async fn main() {
 
     // launch a contaier with Valkey (with Redis Cell module)
     let (_container, port) = utils::launch_redis_container().await;
-    let connection = utils::procure_connection(port).await;
 
     let config = RateLimitConfig::new(RuleProvider, |err, _req| {
         match err {
@@ -94,8 +91,21 @@ async fn main() {
         .route(
             "/articles",
             post(|| async { "will use OpenAI content moderation endpoint" }),
-        )
-        .layer(RateLimitLayer::new(config, connection));
+        );
+
+    #[cfg(feature = "deadpool")]
+    let app = {
+        let pool = utils::procure_connection(port).await;
+        let layer = tower_redis_cell::pooled::RateLimitLayer::new(config, pool);
+        app.layer(layer)
+    };
+
+    #[cfg(not(feature = "deadpool"))]
+    let app = {
+        let connection = utils::procure_connection(port).await;
+        let layer = tower_redis_cell::RateLimitLayer::new(config, connection);
+        app.layer(layer)
+    };
 
     // run our app with hyper, listening globally on port 3000
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
