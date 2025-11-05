@@ -1,7 +1,8 @@
-//! Crate providing rate-limiting functionality relying on `Valkey` or
-//! `Redis` deployed with [Redis Cell](https://github.com/brandur/redis-cell) module.
+//! This crate provides a `Tower` service with rate-limiting functionality
+//! backed by `Valkey` or `Redis` deployed with the [Redis Cell](https://github.com/brandur/redis-cell)
+//! module.
 //!
-//! The constucts this crate provides are transport agnostic (just like
+//! The service and layer this crate provides are transport agnostic (just like
 //! [`Tower`](https://github.com/tower-rs/tower) itself), but here is a basic
 //! example using [`axum`](https://github.com/tokio-rs/axum).
 //!
@@ -31,7 +32,7 @@
 //! }
 //!```
 //!
-//! We now need to instantiate [RateLimitConfig] (which expectes a rule provider
+//! We now need to instantiate [RateLimitConfig] (which expects a rule provider
 //! and an error handler), procure a Valkey/Redis client and use those to create
 //! [RateLimitLayer]. Note that we are using [`ConnectionManager`](redis::aio::ConnectionManager)
 //! in this example, but dy default anything [`ConnectionLike`](https://docs.rs/redis/latest/redis/aio/trait.ConnectionLike.html)
@@ -54,6 +55,10 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
+//!     tracing_subscriber::fmt()
+//!         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+//!         .init();
+//!
 //!     let client = redis::Client::open("redis://127.0.0.1/").unwrap();
 //!     let config = redis::aio::ConnectionManagerConfig::new();
 //!     let connection = redis::aio::ConnectionManager::new_with_config(client, config)
@@ -90,14 +95,17 @@
 //!         }
 //!     });
 //!
-//!     let _app: Router<()> = Router::new()
+//!     let app = Router::new()
 //!         .route("/", get(|| async { "Hello, World!" }))
 //!         .layer(RateLimitLayer::new(config, connection));
+//!
+//!     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+//!     axum::serve(listener, app).await.unwrap();
 //! }
 //!```
-//!
-//! Note that you can optianally provide [`RateLimitConfig::on_success`] and
-//! [`RateLimitConfig::on_unruled`] handlers, which both provide a mutable access
+//! Note that we are in-lining the error handler above, but this might as well be
+//! a free standing function. Also, you can optionally provide [`RateLimitConfig::on_success`]
+//! and [`RateLimitConfig::on_unruled`] handlers, which both provide a mutable access
 //! to the response, and so - if needed - you can set any additional headers.
 
 // #![deny(missing_docs)]
