@@ -1,14 +1,17 @@
+use crate::key::Key;
 use crate::rule::RequestBlockedDetails;
+#[cfg(feature = "deadpool")]
+use deadpool_redis::PoolError;
 use redis::RedisError;
 use redis_cell_rs::Error as RedisCellError;
+use std::borrow::Cow;
 use std::fmt::Display;
-use std::{borrow::Cow, sync::Arc};
 
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct ProvideRuleError<'a> {
-    pub key: Option<Cow<'a, str>>,
     pub detail: Option<Cow<'a, str>>,
+    pub key: Option<Key<'a>>,
 }
 
 impl Display for ProvideRuleError<'_> {
@@ -25,7 +28,7 @@ impl Display for ProvideRuleError<'_> {
 impl<'a> ProvideRuleError<'a> {
     pub fn new<K, D>(key: K, detail: D) -> Self
     where
-        K: Into<Cow<'a, str>>,
+        K: Into<Key<'a>>,
         D: Into<Cow<'a, str>>,
     {
         Self::default().key(key).detail(detail)
@@ -41,7 +44,7 @@ impl<'a> ProvideRuleError<'a> {
 
     pub fn key<K>(mut self, key: K) -> Self
     where
-        K: Into<Cow<'a, str>>,
+        K: Into<Key<'a>>,
     {
         self.key = Some(key.into());
         self
@@ -60,17 +63,21 @@ impl<'a> From<&'a str> for ProvideRuleError<'a> {
     }
 }
 
-#[derive(Clone, Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error<'a> {
     #[error("rule: {0}")]
     ProvideRule(ProvideRuleError<'a>),
 
     #[error(transparent)]
-    RedisCell(RedisCellError),
+    RedisCell(#[from] RedisCellError),
 
     #[error(transparent)]
-    Redis(Arc<RedisError>),
+    Redis(#[from] RedisError),
+
+    #[cfg(feature = "deadpool")]
+    #[error(transparent)]
+    Deadpool(#[from] PoolError),
 
     #[error("request blocked for key {} and can be retried after {} second(s)", .0.rule.key, .0.details.retry_after)]
     RateLimit(RequestBlockedDetails<'a>),

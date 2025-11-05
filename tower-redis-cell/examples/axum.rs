@@ -4,7 +4,7 @@ use axum::routing::post;
 use axum::{Router, body::Body, routing::get};
 use tower_redis_cell::redis_cell::Policy;
 use tower_redis_cell::{
-    Error, ProvideRule, ProvideRuleError, RateLimitConfig, RateLimitLayer, Rule,
+    Error, ProvideRule, ProvideRuleResult, RateLimitConfig, RateLimitLayer, Rule,
 };
 
 const BASIC_POLICY: Policy = Policy::from_tokens_per_second(1).name("basic");
@@ -14,17 +14,12 @@ const STRICT_POLICY: Policy = Policy::from_tokens_per_hour(5).name("strict");
 struct RuleProvider;
 
 impl<T> ProvideRule<Request<T>> for RuleProvider {
-    fn provide<'a>(&self, req: &'a Request<T>) -> Result<Option<Rule<'a>>, ProvideRuleError<'a>> {
+    fn provide<'a>(&self, req: &'a Request<T>) -> ProvideRuleResult<'a> {
         let key = req
             .headers()
             .get("x-api-key")
             .and_then(|val| val.to_str().ok())
             .ok_or("cannot define key, since 'x-api-key' header is missing")?;
-
-        if !key.starts_with("proj_") {
-            return Err(ProvideRuleError::new(key, "wrong api key provided"));
-        }
-
         let rule = if req.method() == Method::POST && req.uri().path().contains("/articles") {
             Rule::new(key, STRICT_POLICY).resource("articles::write")
         } else {
@@ -48,7 +43,7 @@ async fn main() {
         match err {
             Error::ProvideRule(err) => {
                 tracing::warn!(
-                    key = err.key.as_deref(),
+                    key = ?err.key,
                     detail = err.detail.as_deref(),
                     "failed to defined rule for request"
                 );
@@ -94,7 +89,6 @@ async fn main() {
         //
     });
 
-    // build our application with a single route
     let app = Router::new()
         .route("/", get(|| async { "Hello, World!" }))
         .route(
@@ -126,7 +120,7 @@ mod utils {
     }
 
     #[cfg(not(feature = "deadpool"))]
-    pub async fn procure_connection(port: u16) -> ConnectionManager {
+    pub async fn procure_connection(port: u16) -> redis::aio::ConnectionManager {
         let client = redis::Client::open(("localhost", port)).unwrap();
         let config = redis::aio::ConnectionManagerConfig::new().set_number_of_retries(1);
         redis::aio::ConnectionManager::new_with_config(client, config)

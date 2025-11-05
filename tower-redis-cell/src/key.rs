@@ -10,6 +10,7 @@ pub enum Key<'a> {
     Isize(isize),
 
     #[cfg(feature = "uuid")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
     Uuid(uuid::Uuid),
 }
 

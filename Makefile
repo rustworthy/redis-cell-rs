@@ -9,9 +9,17 @@ CELL_VERSION=0.4.0
 help:
 	@grep -E '^[/0-9a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
+.PHONY: doc
+doc:
+	RUSTDOCFLAGS='--cfg docsrs' cargo +nightly d --all-features --open -p tower-redis-cell
+
 .PHONY: test
 test: ## Run tests
 	cargo t
+
+.PHONY: test/doc
+test/doc: ## Run doc tests
+	cargo t --doc
 
 .PHONY: images/redis
 images/redis: ## Build Redis with Redis Cell module docker image

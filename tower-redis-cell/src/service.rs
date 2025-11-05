@@ -98,9 +98,9 @@ mod inner {
 
                 let redis_response = match connection.req_packed_command(&cmd.into()).await {
                     Ok(res) => res,
-                    Err(redis) => {
+                    Err(redis_err) => {
                         let config::OnError::Sync(ref h) = config.on_error;
-                        let handled = h(Error::Redis(Arc::new(redis)), &req);
+                        let handled = h(redis_err.into(), &req);
                         return Ok(handled.into());
                     }
                 };
@@ -187,6 +187,7 @@ mod inner {
 }
 
 #[cfg(feature = "deadpool")]
+#[cfg_attr(docsrs, doc(cfg(feature = "deadpool")))]
 mod inner {
     use crate::config;
     use crate::error::Error;
@@ -282,12 +283,20 @@ mod inner {
                 let policy = rule.policy;
                 let cmd = redis_cell::Cmd::new(&rule.key, &policy);
 
-                let mut connection = pool.get().await.unwrap(); // XXX: add error variant
+                let mut connection = match pool.get().await {
+                    Ok(conn) => conn,
+                    Err(deadpool_err) => {
+                        let config::OnError::Sync(ref h) = config.on_error;
+                        let handled = h(deadpool_err.into(), &req);
+                        return Ok(handled.into());
+                    }
+                };
+
                 let redis_response = match connection.req_packed_command(&cmd.into()).await {
                     Ok(res) => res,
-                    Err(redis) => {
+                    Err(redis_err) => {
                         let config::OnError::Sync(ref h) = config.on_error;
-                        let handled = h(Error::Redis(Arc::new(redis)), &req);
+                        let handled = h(redis_err.into(), &req);
                         return Ok(handled.into());
                     }
                 };
