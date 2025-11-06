@@ -2,6 +2,18 @@
 name = "redis-cell-rs"
 version = "0.1.0"
 edition = "2024"
+authors = ["Pavel Mikhalkevich <pavel@mikhalkevich.com>"]
+description = "Rust bindings for the Redis Cell module"
+repository = "https://github.com/rustworthy/redis-cell-rs.git"
+keywords = ["Valkey", "Redis", "Redis-Cell", "GCRA", "Rate-Limit"]
+categories = ["api-bindings", "network-programming"]
+exclude = [
+  ".github",
+  "redis.Dockerfile",
+  "valkey.Dockerfile",
+  ".gitignore",
+  "Makefile",
+]
 
 [dependencies]
 redis = { version = "0.32.7", default-features = false }
