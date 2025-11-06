@@ -1,6 +1,6 @@
 //!This crate provides Rust bindings for the [Redis Cell](https://github.com/brandur/redis-cell) module.
 //!
-//!You can defined a rate-limiting [`Policy`] in quite a few ways:
+//!You can define a rate-limiting [`Policy`] in quite a few ways:
 //!```
 //!use redis_cell_rs::Policy;
 //!use std::time::Duration;
