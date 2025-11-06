@@ -11,11 +11,11 @@ help:
 
 .PHONY: doc
 doc:
-	RUSTDOCFLAGS='--cfg docsrs' cargo +nightly d --all-features --open -p tower-redis-cell
+	RUSTDOCFLAGS='--cfg docsrs' cargo +nightly d --all-features --open
 
 .PHONY: test
 test: ## Run tests
-	cargo t
+	cargo t -- --nocapture
 
 .PHONY: test/doc
 test/doc: ## Run doc tests

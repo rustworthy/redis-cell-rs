@@ -1,5 +1,4 @@
-use crate::Error;
-use redis::Value as RedisValue;
+use redis::{ErrorKind, FromRedisValue, RedisError, RedisResult, Value as RedisValue};
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -14,8 +13,8 @@ pub struct AllowedDetails {
 pub struct BlockedDetails {
     pub total: usize,
     pub remaining: usize,
-    pub retry_after: u64,
     pub reset_after: u64,
+    pub retry_after: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -24,41 +23,58 @@ pub enum Verdict {
     Blocked(BlockedDetails),
 }
 
-impl TryFrom<RedisValue> for Verdict {
-    type Error = Error;
-    fn try_from(value: RedisValue) -> Result<Self, Self::Error> {
-        let value = value.into_sequence().map_err(|value| {
-            Error::from(format!(
+impl Verdict {
+    pub fn try_from_redis_value(value: &RedisValue) -> RedisResult<Self> {
+        let value = value.as_sequence().ok_or_else(|| {
+            let detail = format!(
                 "failed to decode Redis Cell response: exapected sequence, but got {:?}",
                 value
-            ))
+            );
+            (
+                ErrorKind::ResponseError,
+                "invalid Redis Cell response",
+                detail,
+            )
         })?;
 
         if value.len() != 5 {
-            return Err(format!(
+            let detail = format!(
                 "failed to decode Redis Cell response: exapected sequence of 5 elements, but got {:?}",
                 value
-            ).into());
+            );
+            let error = (
+                ErrorKind::ResponseError,
+                "invalid Redis Cell response",
+                detail,
+            )
+                .into();
+            return Err(error);
         }
 
         let (throttled, total, remaining, retry_after, reset_after) =
             (&value[0], &value[1], &value[2], &value[3], &value[4]);
 
-        let verdict = if parse_throttled(throttled)? {
+        let verdict = if parse_throttled(throttled).map_to_redis_err()? {
             Verdict::Blocked(BlockedDetails {
-                total: try_to_usize("total", total)?,
-                remaining: try_to_usize("remaining", remaining)?,
-                retry_after: try_to_u64("retry_after", retry_after)?,
-                reset_after: try_to_u64("reset_after", reset_after)?,
+                total: try_to_usize("total", total).map_to_redis_err()?,
+                remaining: try_to_usize("remaining", remaining).map_to_redis_err()?,
+                retry_after: try_to_u64("retry_after", retry_after).map_to_redis_err()?,
+                reset_after: try_to_u64("reset_after", reset_after).map_to_redis_err()?,
             })
         } else {
             Verdict::Allowed(AllowedDetails {
-                total: try_to_usize("total", total)?,
-                remaining: try_to_usize("remaining", remaining)?,
-                reset_after: try_to_u64("reset_after", reset_after)?,
+                total: try_to_usize("total", total).map_to_redis_err()?,
+                remaining: try_to_usize("remaining", remaining).map_to_redis_err()?,
+                reset_after: try_to_u64("reset_after", reset_after).map_to_redis_err()?,
             })
         };
         Ok(verdict)
+    }
+}
+
+impl FromRedisValue for Verdict {
+    fn from_redis_value(v: &RedisValue) -> redis::RedisResult<Self> {
+        Verdict::try_from_redis_value(v)
     }
 }
 
@@ -101,5 +117,22 @@ fn try_to_int(field: &str, value: &RedisValue) -> Result<i64, String> {
             "failed to parse {}: expected integer, but got {:?}",
             field, value
         )),
+    }
+}
+
+trait MapToRedisError<T> {
+    fn map_to_redis_err(self) -> Result<T, RedisError>;
+}
+
+impl<T> MapToRedisError<T> for Result<T, String> {
+    fn map_to_redis_err(self) -> Result<T, RedisError> {
+        self.map_err(|detail| {
+            (
+                ErrorKind::ResponseError,
+                "invalid Redis Cell response",
+                detail,
+            )
+                .into()
+        })
     }
 }
