@@ -3,6 +3,7 @@ name = "redis-cell-rs"
 version = "0.1.0"
 edition = "2024"
 authors = ["Pavel Mikhalkevich <pavel@mikhalkevich.com>"]
+license = "MIT OR Apache-2.0"
 description = "Rust bindings for the Redis Cell module"
 repository = "https://github.com/rustworthy/redis-cell-rs.git"
 keywords = ["Valkey", "Redis", "Redis-Cell", "GCRA", "Rate-Limit"]
