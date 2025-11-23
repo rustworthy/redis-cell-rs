@@ -83,7 +83,7 @@ mod tests {
     use std::time::Duration;
     use testcontainers::core::IntoContainerPort as _;
     use testcontainers::runners::AsyncRunner;
-    use testcontainers::{GenericImage, core::WaitFor};
+    use testcontainers::{core::WaitFor, GenericImage};
 
     async fn it_works_with(image: &str) {
         let container = GenericImage::new(image, "latest")
