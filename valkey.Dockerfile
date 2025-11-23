@@ -7,12 +7,14 @@ RUN git clone -b valkey https://github.com/rustworthy/redis-cell.git .
 RUN cargo build --release --features valkey
 
 ################################ RUNTIME ######################################
-FROM valkey/valkey:9.0.0 AS runtime
+FROM bitnami/valkey:latest AS runtime
 
+USER root
 RUN mkdir -p /usr/local/lib/valkey/modules
 COPY --from=builder /redis-cell/target/release/libredis_cell.so /usr/local/lib/valkey/modules/libredis_cell.so
-RUN chown -R valkey:valkey /usr/local/lib/valkey
+RUN chown -R 1001:1001 /usr/local/lib/valkey
 
-USER valkey
+USER 1001
 
-CMD ["valkey-server", "--loadmodule", "/usr/local/lib/valkey/modules/libredis_cell.so"]
+ENTRYPOINT [ "/opt/bitnami/scripts/valkey/entrypoint.sh" ]
+CMD [ "/opt/bitnami/scripts/valkey/run.sh", "--loadmodule", "/usr/local/lib/valkey/modules/libredis_cell.so" ]
